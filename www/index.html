@@ -1,4 +1,53 @@
 <!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>SECD Emulator</title></head>
-<body><div id="app"></div>
-<script src="/js/main.js"></script></body></html>
+<html><head><meta charset="utf-8"><title>SECD Emulator</title>
+<style>
+ body{font-family:system-ui,sans-serif;margin:2em;background:#141414;color:#ddd}
+ h1{font-weight:600}
+ button{margin-right:.4em;padding:.3em .8em}
+ select,input[type=text]{background:#222;color:#eee;border:1px solid #444;padding:.25em}
+ pre#console{background:#000;border:1px solid #333;min-height:14em;padding:1em;
+             white-space:pre-wrap;color:#7f7}
+ #status{color:#888}
+</style></head><body>
+<h1>SECD Emulator</h1>
+<p>
+ <select id="device"><option>— press Refresh —</option></select>
+ <button onclick="send({cmd:'devices'})">refresh devices</button>
+ <input type="file" id="file" accept=".secd,.bin">
+ <button onclick="loadFile()">load bytecode</button>
+ <button onclick="send({cmd:'run'})">run</button>
+ <button onclick="send({cmd:'reset'})">reset</button>
+</p>
+<p id="status">connecting…</p>
+<pre id="console"></pre>
+<input type="text" id="in" style="width:60%" placeholder="stdin → Enter"
+       onkeydown="if(event.key==='Enter'){const v=this.value+'\n';
+         send({cmd:'console-in',text:v}); append(v); this.value='';}">
+<script>
+let ws;
+function append(t){document.getElementById('console').textContent+=t;}
+function send(o){if(ws&&ws.readyState===1)ws.send(JSON.stringify(o));
+                 else append('[not connected]\n');}
+function loadFile(){const f=document.getElementById('file').files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=()=>{const b=new Uint8Array(r.result);
+    let s='';b.forEach(x=>s+=String.fromCharCode(x));
+    send({cmd:'load','bytecode-b64':btoa(s)});};
+  r.readAsArrayBuffer(f);}
+function connect(){
+  ws=new WebSocket("ws://"+location.host+"/socket");
+  ws.onopen=()=>document.getElementById('status').textContent='connected';
+  ws.onmessage=(e)=>{const m=JSON.parse(e.data);
+    switch(m.type){
+      case "hello": send({cmd:'devices'}); break;
+      case "devices":{const sel=document.getElementById('device');sel.innerHTML='';
+        m.list.forEach(d=>{const o=document.createElement('option');
+          o.value=d.name;o.textContent=d.board+' ('+d.chip+')';
+          sel.appendChild(o);});break;}
+      case "console": append(m.text); break;
+      default: append('\n['+m.type+(m.result!==undefined?': '+m.result:'')+']\n');
+    }};
+  ws.onclose=()=>{document.getElementById('status').textContent='disconnected';
+                  setTimeout(connect,2000);};}
+connect();
+</script></body></html>

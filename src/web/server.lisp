@@ -285,7 +285,7 @@ nested objects, proper lists become arrays."
                         :short-name #\a
                         :long-name "address"
                         :description "Address to bind;"
-                        :initial-value "127.0.0.1"
+                        :initial-value "0.0.0.0"
                         :key :address)
    (clingon:make-option :string
                         :long-name "targets"
