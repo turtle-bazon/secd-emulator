@@ -209,28 +209,43 @@ nested objects, proper lists become arrays."
 ;;; ------------------------------ clack app ---------------------------------
 (defun make-app ()
   (lambda (env)
-    (cond
-      ((equal (getf env :path-info) "/socket")
-       (let ((ws (websocket-driver:make-server env))
-             (session (list :ws nil :id (format nil "~A" (getf env :request-uri)))))
-         (websocket-driver:on
-          :open ws
-          (lambda ()
-            (setf (getf session :ws) ws)
-            (setf (gethash ws *sessions*) session)
-            (ws-send session '(("type" . "hello")))))
-         (websocket-driver:on
-          :message ws
-          (lambda (raw)
-            (ignore-errors (handle-message session raw))))
-         (websocket-driver:on
-          :close ws
-          (lambda (&rest _) (declare (ignore _)) (remhash ws *sessions*)))
-         (lambda (responder)
-           (declare (ignore responder))
-           (websocket-driver:start-connection ws))))
-      (t
-       (let ((path (getf env :path-info)))
+    ;; WebSocket upgrades are detected by headers, not by path: after the
+    ;; 101 the connection belongs to the driver, so this branch must be
+    ;; checked first on EVERY request.
+    (when (equal (getf env :path-info) "/socket")
+          (format *error-output* "~%WS-DEBUG method=~S upgrade=~S conn=~S ver=~S ws-p=~S~%"
+                  (getf env :request-method)
+                  (ignore-errors (gethash "upgrade" (getf env :headers)))
+                  (ignore-errors (gethash "connection" (getf env :headers)))
+                  (ignore-errors (gethash "sec-websocket-version" (getf env :headers)))
+                  (websocket-driver:websocket-p env)))
+    (if (websocket-driver:websocket-p env)
+        (progn
+          (format *error-output* "~%WS-UPGRADE entered~%")
+          (let ((ws (websocket-driver:make-server env))
+              (session (list :ws nil
+                             :id (format nil "~A" (get-universal-time)
+                                         (random 100000)))))
+          (websocket-driver:on
+           :open ws
+           (lambda ()
+             (setf (getf session :ws) ws)
+             (setf (gethash ws *sessions*) session)
+             (ws-send session '(("type" . "hello")))))
+          (websocket-driver:on
+           :message ws
+           (lambda (raw)
+             (handle-message session raw)))
+          (websocket-driver:on
+           :close ws
+           (lambda (&rest _) (declare (ignore _)) (remhash ws *sessions*)))
+          (lambda (responder)
+            (declare (ignore responder))
+            (format *error-output* "~%WS-START~%")
+            (websocket-driver:start-connection ws)))))
+      (cond
+        (t
+         (let ((path (getf env :path-info)))
          (flet ((serve (content ctype)
                   `(200 (:content-type ,ctype) (,content))))
            (cond
