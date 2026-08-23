@@ -12,6 +12,7 @@ frontend:
 
 # Standalone binary: assets + device catalog are baked in at compile time.
 build:
+	@touch src/web/assets.lisp   # re-capture embedded www/* + catalog snapshot
 	$(LISP) --non-interactive --load build.lisp
 
 clean:
