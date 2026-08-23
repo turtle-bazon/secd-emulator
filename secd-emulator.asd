@@ -14,7 +14,8 @@
    (:module "src/web"
     :depends-on ("src/vm")
     :components ((:file "package")
-                 (:file "server" :depends-on ("package"))))))
+                 (:file "assets" :depends-on ("package"))
+                 (:file "server" :depends-on ("package" "assets"))))))
 
 (defsystem "secd-emulator/executable"
   :build-operation "program-op"

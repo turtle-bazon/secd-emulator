@@ -29,3 +29,15 @@ Server → client: `{type: hello|devices|selected|loaded|console|hal|halted|rese
   compiler output (hello/factorial).
 - Primitives: universal core + %bn-* + GPIO/UART/I²C sims (event-emitting);
   USB/HID stubbed.
+
+## Known issue
+
+The standalone `build/secd-emulator` image currently raises
+`invalid number of arguments: 2` at startup under SBCL 2.6.5 (an
+entry-point/fdefn restore quirk being investigated). Until fixed, run the
+server from source:
+
+    sbcl --load run-server.lisp
+
+Everything else (embedded UI + embedded device catalog, WebSocket API) is
+identical in that mode.

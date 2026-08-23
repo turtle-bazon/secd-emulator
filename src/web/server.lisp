@@ -4,21 +4,39 @@
 (defvar *sessions* (make-hash-table :test 'equal)) ; ws -> session plist
 (defvar *device-cache* nil)
 (defun find-repo-root ()
-  "Walk up from the system source dir until a sibling 'secd-machine/' exists."
+  "Walk up from the system source dir until a sibling 'secd-machine/'
+directory exists; returns that sibling's parent (repo root). Never
+produces '..' components — this box's TRUENAME rejects them."
   (let ((dir (asdf:system-source-directory :secd-emulator)))
-    (loop for i from 0 below 6
-          for candidate = dir then (uiop:pathname-parent-directory-pathname candidate)
-          when (uiop:directory-exists-p
-                (merge-pathnames "../secd-machine/targets/" candidate))
-            return (uiop:ensure-directory-pathname candidate)
-          finally (return (uiop:getcwd)))))
+    (loop for i from 0 below 8
+          for cand = dir then (uiop:pathname-parent-directory-pathname cand)
+          for parent = (uiop:pathname-parent-directory-pathname cand)
+          for tgt = (merge-pathnames "secd-machine/targets/" parent)
+          when (uiop:directory-exists-p tgt)
+            return (uiop:ensure-directory-pathname
+                    (or (ignore-errors (truename parent)) parent))
+          finally (return (uiop:ensure-directory-pathname (uiop:getcwd))))))
 
 (defparameter *base-dir* (find-repo-root))
 
+(defun simplify-path (p)
+  "Lexically remove '..' components (this box's TRUENAME rejects them)."
+  (let* ((path (uiop:ensure-directory-pathname p))
+         (parts (append (pathname-directory path) '(:back)))
+         (stack '()))
+    (dolist (x parts)
+      (cond ((eq x :absolute) (push :absolute stack))
+            ((eq x :back) (when (and stack (not (eq (first stack) :absolute)))
+                            (pop stack)))
+            ((member x '(:relative :wild-inferiors)) nil)
+            (t (push x stack))))
+    (make-pathname :directory (nreverse stack)
+                   :name (pathname-name path) :type (pathname-type path))))
+
 (defun resolve-dir (p)
-  "Truename-resolve so no '..' components survive."
-  (uiop:ensure-directory-pathname
-   (or (ignore-errors (truename p)) p)))
+  (let ((clean (simplify-path p)))
+    (uiop:ensure-directory-pathname
+     (or (ignore-errors (truename clean)) clean))))
 
 (defparameter *targets-dir*
   (resolve-dir (merge-pathnames "../secd-machine/targets/" *base-dir*)))
@@ -26,26 +44,66 @@
   (resolve-dir (merge-pathnames "www/" *base-dir*)))
 
 ;;; ------------------------- device catalog --------------------------------
-(defun load-device-catalog ()
-  "Merge chips/*.json under boards/*.json exactly like write-target-metadata."
+(defparameter *targets-override* nil
+  "Set via SECD_TARGETS_DIR env or --targets; when set, the catalog is
+loaded live from this directory instead of the embedded snapshot.")
+
+(defun load-catalog-from-dir (dir)
   (let ((chips (make-hash-table :test 'equal))
-        (boards '()))
-    (dolist (f (uiop:directory-files (merge-pathnames "chips/" *targets-dir*) "*.json"))
+        (boards nil))
+    (dolist (f (uiop:directory-files (merge-pathnames "chips/" dir) #P"*.json"))
       (let ((d (yason:parse (uiop:read-file-string f))))
         (setf (gethash (gethash "chip" d) chips) d)))
-    (dolist (f (uiop:directory-files (merge-pathnames "boards/" *targets-dir*) "*.json"))
+    (dolist (f (uiop:directory-files (merge-pathnames "boards/" dir) #P"*.json"))
       (push (yason:parse (uiop:read-file-string f)) boards))
-    (setf *device-cache*
-          (loop for b in (nreverse boards)
-                for base = (gethash (gethash "chip" b) chips)
-                when base
-                  collect (progn
-                            ;; chip defaults underneath, board overrides on top
-                            (maphash (lambda (k v)
-                                       (unless (gethash k b)
-                                         (setf (gethash k b) v)))
-                                     base)
-                            b)))))
+    (when boards
+      (loop for b in (nreverse boards)
+            for base = (gethash (gethash "chip" b) chips)
+            when base
+              collect (progn
+                        (maphash (lambda (k v)
+                                   (unless (gethash k b) (setf (gethash k b) v)))
+                                 base)
+                        b)))))
+
+(defun parse-json-text (text)
+  (yason:parse text))
+
+(defun embedded-catalog ()
+  (let ((chips (make-hash-table :test 'equal))
+        (boards nil))
+    (dolist (pair *embedded-chips*)
+      (let ((d (parse-json-text (cdr pair))))
+        (setf (gethash (gethash "chip" d) chips) d
+              (gethash "name" d) (car pair))))
+    (dolist (pair *embedded-boards*)
+      (let ((d (parse-json-text (cdr pair))))
+        (setf (gethash "name" d) (car pair))
+        (push d boards)))
+    (when boards
+      (loop for b in (nreverse boards)
+            for base = (gethash (gethash "chip" b) chips)
+            when base
+              collect (progn
+                        (maphash (lambda (k v)
+                                   (unless (gethash k b) (setf (gethash k b) v)))
+                                 base)
+                        b)))))
+
+(defun load-device-catalog ()
+  "Embedded snapshot by default. Explicit SECD_TARGETS_DIR / --targets
+switches to a live directory (an installed or separate secd-machine)."
+  (let* ((env (uiop:getenv "SECD_TARGETS_DIR"))
+         (dir (or *targets-override*
+                  (and env (uiop:ensure-directory-pathname env)))))
+    (if dir
+        (or (load-catalog-from-dir dir)
+            (progn
+              (format *error-output*
+                      "~%; warning: no boards found under ~A; using embedded catalog~%"
+                      dir)
+              (embedded-catalog)))
+        (embedded-catalog))))
 
 (defun device-summary (b)
   `(("name" . ,(gethash "name" b))
@@ -194,7 +252,11 @@ nested objects, proper lists become arrays."
 ;;; ------------------------------ entry -------------------------------------
 (defvar *acceptor* nil)
 
-(defun main (&key (port 8899) (address "127.0.0.1"))
+(defun main ()
+  ;; binary entry point
+  (apply #'main-cli (uiop:command-line-arguments)))
+
+(defun %run (&key (port 8899) (address "127.0.0.1"))
   (load-device-catalog)
   (format t "~&Devices (~A): ~{~A~^, ~}~%"
           *targets-dir*
@@ -209,5 +271,17 @@ nested objects, proper lists become arrays."
           address port address port)
   *acceptor*)
 
-(defun start-server (&key (port 8899) (address "127.0.0.1"))
-  (bt:make-thread (lambda () (main :port port :address address))))
+(defun main-cli (args)
+  "Minimal CLI: --port N --address ADDR --targets DIR [MARKER-V2]"
+  (let (port address targets)
+    (loop while args
+          do (progn
+               (let ((a (pop args)))
+                 (cond ((string= a "--port") (setf port (parse-integer (pop args))))
+                       ((string= a "--address") (setf address (pop args)))
+                       ((string= a "--targets")
+                        (setf targets (uiop:ensure-directory-pathname (pop args))))
+                       (t (format *error-output* "unknown arg ~A~%" a))))))
+    (when targets (setf *targets-override* targets))
+    (apply #'%run `(,.(when port `(:port ,port))
+                     ,.(when address `(:address ,address))))))
