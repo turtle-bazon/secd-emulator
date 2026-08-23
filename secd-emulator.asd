@@ -3,7 +3,7 @@
   :version "0.1.0"
   :author "turtle-bazon"
   :license "GPL3"
-  :depends-on ("clack" "websocket-driver" "clack-handler-wookie" "yason" "bordeaux-threads" "clingon" "babel" "cl-base64"
+  :depends-on ("clack" "websocket-driver" "clack-handler-wookie" "com.inuoe.jzon" "yason" "bordeaux-threads" "clingon" "babel" "cl-base64"
                "flexi-streams" "uiop")
   :components
   ((:module "src/vm"
@@ -14,9 +14,8 @@
    (:module "src/web"
     :depends-on ("src/vm")
     :components ((:file "package")
-                 (:file "assets" :depends-on ("package"))
-                 (:file "device-catalog" :depends-on ("package"))
-                 (:file "server" :depends-on ("package" "assets"))))))
+                 (:file "generated-assets" :depends-on ("package"))
+                 (:file "server" :depends-on ("package" "generated-assets"))))))
 
 (defsystem "secd-emulator/executable"
   :build-operation "program-op"
