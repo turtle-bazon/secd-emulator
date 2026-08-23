@@ -1,6 +1,7 @@
 ;;;; package.lisp — web server
 (defpackage #:secd-emulator.web
   (:use #:cl)
+  (:import-from #:flexi-streams #:flexi-stream-stream)
   (:local-nicknames (#:vm #:secd-emulator.vm))
   (:import-from #:secd-emulator.vm
                 #:make-heap #:make-machine #:machine-heap
