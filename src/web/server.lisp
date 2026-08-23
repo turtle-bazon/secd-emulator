@@ -168,7 +168,10 @@ nested objects, proper lists become arrays."
 
 ;;; --------------------------- protocol dispatch ----------------------------
 (defun handle-message (session raw)
-  (labels ((jstr (msg key) (cdr (assoc key msg :test #'string=))))
+  (labels ((jstr (msg key)
+             (if (hash-table-p msg)
+                 (gethash key msg)
+                 (cdr (assoc key msg :test #'string=)))))
     (let* ((msg (yason:parse raw))
            (cmd (jstr msg "cmd"))
            (vm  (getf session :vm)))
@@ -228,33 +231,17 @@ nested objects, proper lists become arrays."
            (websocket-driver:start-connection ws))))
       (t
        (let ((path (getf env :path-info)))
-         (labels ((read-bin (p)
-                    (with-open-file (f p :element-type '(unsigned-byte 8))
-                      (let ((b (make-array (file-length f)
-                                           :element-type '(unsigned-byte 8))))
-                        (read-sequence b f) b)))
-                  (serve (p ctype)
-                    `(200 (:content-type ,ctype)
-                          ,(read-bin p))))
+         (flet ((serve (content ctype)
+                  `(200 (:content-type ,ctype) (,content))))
            (cond
              ((member path '("/" "/index.html") :test #'equal)
-              (serve (merge-pathnames "index.html" *www-dir*)
-                     "text/html; charset=utf-8"))
-             ((and (> (length path) 1)
-                   (probe-file (merge-pathnames (subseq path 1) *www-dir*)))
-              (let ((p (merge-pathnames (subseq path 1) *www-dir*)))
-                (serve p
-                       (cond ((search ".js" path) "application/javascript")
-                             ((search ".css" path) "text/css")
-                             (t "application/octet-stream")))))
+              (serve *asset-index-html* "text/html; charset=utf-8"))
+             ((equal path "/js/main.js")
+              (serve *asset-js-main* "application/javascript"))
              (t '(404 (:content-type "text/plain") ("not found"))))))))))
 
 ;;; ------------------------------ entry -------------------------------------
 (defvar *acceptor* nil)
-
-(defun main ()
-  ;; binary entry point
-  (apply #'main-cli (uiop:command-line-arguments)))
 
 (defun %run (&key (port 8899) (address "127.0.0.1"))
   (load-device-catalog)
@@ -271,17 +258,50 @@ nested objects, proper lists become arrays."
           address port address port)
   *acceptor*)
 
-(defun main-cli (args)
-  "Minimal CLI: --port N --address ADDR --targets DIR [MARKER-V2]"
-  (let (port address targets)
-    (loop while args
-          do (progn
-               (let ((a (pop args)))
-                 (cond ((string= a "--port") (setf port (parse-integer (pop args))))
-                       ((string= a "--address") (setf address (pop args)))
-                       ((string= a "--targets")
-                        (setf targets (uiop:ensure-directory-pathname (pop args))))
-                       (t (format *error-output* "unknown arg ~A~%" a))))))
-    (when targets (setf *targets-override* targets))
-    (apply #'%run `(,.(when port `(:port ,port))
-                     ,.(when address `(:address ,address))))))
+(defun make-options ()
+  (list
+   (clingon:make-option :integer
+                        :short-name #\p
+                        :long-name "port"
+                        :description "TCP port to listen on;"
+                        :initial-value 8899
+                        :key :port)
+   (clingon:make-option :string
+                        :short-name #\a
+                        :long-name "address"
+                        :description "Address to bind;"
+                        :initial-value "127.0.0.1"
+                        :key :address)
+   (clingon:make-option :string
+                        :long-name "targets"
+                        :description "Device catalog directory (overrides embedded);"
+                        :key :targets)))
+
+(defun main-handler (cmd)
+  (handler-case
+      (let ((port (clingon:getopt cmd :port))
+            (address (clingon:getopt cmd :address))
+            (targets (clingon:getopt cmd :targets)))
+        (when targets
+          (setf *targets-override*
+                (uiop:ensure-directory-pathname targets)))
+        (%run :port port :address address))
+    (error (e)
+      (format *error-output* "~A~%" e)
+      (clingon:exit 255))))
+
+(defun make-command ()
+  (clingon:make-command
+   :name "secd-emulator"
+   :description "SECD machine emulator web server (WebSocket protocol)."
+   :version (asdf:component-version (asdf:find-system :secd-emulator))
+   :options (make-options)
+   :handler #'main-handler))
+
+(defun main ()
+  (if (null (uiop:command-line-arguments))
+      (progn
+        (format t "Usage: secd-emulator [--port N] [--address ADDR]
+          [--targets DIR]~%Try --help.~%")
+        (clingon:exit 0))
+      (clingon:run (make-command))))
