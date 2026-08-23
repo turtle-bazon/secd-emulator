@@ -48,62 +48,32 @@ produces '..' components — this box's TRUENAME rejects them."
   "Set via SECD_TARGETS_DIR env or --targets; when set, the catalog is
 loaded live from this directory instead of the embedded snapshot.")
 
-(defun load-catalog-from-dir (dir)
-  (let ((chips (make-hash-table :test 'equal))
-        (boards nil))
-    (dolist (f (uiop:directory-files (merge-pathnames "chips/" dir) #P"*.json"))
-      (let ((d (yason:parse (uiop:read-file-string f))))
-        (setf (gethash (gethash "chip" d) chips) d)))
-    (dolist (f (uiop:directory-files (merge-pathnames "boards/" dir) #P"*.json"))
-      (push (yason:parse (uiop:read-file-string f)) boards))
-    (when boards
-      (loop for b in (nreverse boards)
-            for base = (gethash (gethash "chip" b) chips)
-            when base
-              collect (progn
-                        (maphash (lambda (k v)
-                                   (unless (gethash k b) (setf (gethash k b) v)))
-                                 base)
-                        b)))))
-
-(defun parse-json-text (text)
-  (yason:parse text))
-
-(defun embedded-catalog ()
-  (let ((chips (make-hash-table :test 'equal))
-        (boards nil))
-    (dolist (pair *embedded-chips*)
-      (let ((d (parse-json-text (cdr pair))))
-        (setf (gethash (gethash "chip" d) chips) d
-              (gethash "name" d) (car pair))))
-    (dolist (pair *embedded-boards*)
-      (let ((d (parse-json-text (cdr pair))))
-        (setf (gethash "name" d) (car pair))
-        (push d boards)))
-    (when boards
-      (loop for b in (nreverse boards)
-            for base = (gethash (gethash "chip" b) chips)
-            when base
-              collect (progn
-                        (maphash (lambda (k v)
-                                   (unless (gethash k b) (setf (gethash k b) v)))
-                                 base)
-                        b)))))
-
 (defun load-device-catalog ()
-  "Embedded snapshot by default. Explicit SECD_TARGETS_DIR / --targets
-switches to a live directory (an installed or separate secd-machine)."
+  "Pre-merged catalog baked into the image; SECD_TARGETS_DIR / --targets
+switch to a live directory (installed or separate secd-machine)."
   (let* ((env (uiop:getenv "SECD_TARGETS_DIR"))
          (dir (or *targets-override*
                   (and env (uiop:ensure-directory-pathname env)))))
     (if dir
-        (or (load-catalog-from-dir dir)
-            (progn
-              (format *error-output*
-                      "~%; warning: no boards found under ~A; using embedded catalog~%"
-                      dir)
-              (embedded-catalog)))
-        (embedded-catalog))))
+        (let ((chips (make-hash-table :test 'equal)) (boards nil))
+          (dolist (f (uiop:directory-files (merge-pathnames "chips/" dir) "*.json"))
+            (let ((d (yason:parse (uiop:read-file-string f))))
+              (setf (gethash (gethash "chip" d) chips) d)))
+          (dolist (f (uiop:directory-files (merge-pathnames "boards/" dir) "*.json"))
+            (push (yason:parse (uiop:read-file-string f)) boards))
+          (when boards
+            (loop for b in (nreverse boards)
+                  for base = (gethash (gethash "chip" b) chips)
+                  when base
+                    collect (progn
+                              (maphash (lambda (k v)
+                                         (unless (gethash k b)
+                                           (setf (gethash k b) v)))
+                                       base)
+                              b)))
+          ;; fall through to embedded when the override dir had nothing
+          )
+        (load-device-catalog-from-embedded))))
 
 (defun device-summary (b)
   `(("name" . ,(gethash "name" b))
@@ -219,7 +189,8 @@ nested objects, proper lists become arrays."
                   (ignore-errors (gethash "connection" (getf env :headers)))
                   (ignore-errors (gethash "sec-websocket-version" (getf env :headers)))
                   (websocket-driver:websocket-p env)))
-    (if (websocket-driver:websocket-p env)
+    (if (or (websocket-driver:websocket-p env)
+            (equal (getf env :path-info) "/socket"))
         (progn
           (format *error-output* "~%WS-UPGRADE entered~%")
           (let ((ws (websocket-driver:make-server env))
@@ -251,6 +222,17 @@ nested objects, proper lists become arrays."
            (cond
              ((member path '("/" "/index.html") :test #'equal)
               (serve *asset-index-html* "text/html; charset=utf-8"))
+             ((and (> (length path) 5)
+                   (string= path ".secd" :start1 (- (length path) 5)))
+              ;; Precompiled examples are embedded (filename incl. .secd).
+              (let* ((name (subseq path 1))
+                     (pair (assoc name *embedded-bytecodes*
+                                  :test #'string=)))
+                (if pair
+                    (list 200 '(:content-type "application/octet-stream")
+                          (cdr pair))
+                    '(404 (:content-type "text/plain")
+                      ("no such bytecode")))))
              ((equal path "/js/main.js")
               (serve *asset-js-main* "application/javascript"))
              (t '(404 (:content-type "text/plain") ("not found"))))))))))
