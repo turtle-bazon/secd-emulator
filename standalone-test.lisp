@@ -1,16 +1,18 @@
-;;;; server.lisp — minimal SECD emulator: REST API only, no WebSocket
-
-(in-package #:cl-user)
+;;;; standalone-test.lisp — run directly: sbcl --load standalone-test.lisp
+;;;; Minimal HTTP API test, no project packages needed.
 
 (ql:quickload '(:clack :clack-handler-wookie) :silent t)
 
-(defpackage #:secd.web
+(defpackage #:secd-standalone
   (:use #:cl))
 
-(in-package #:secd.web)
+(in-package #:secd-standalone)
 
 (defvar *devices*
-  '("blue-pill" "stamp-s3a" "black-pill-f401"))
+  '("blue-pill" "stamp-s3a" "black-pill-f401"
+    "esp32c3-supermini" "esp32s3-devkit" "lolin-s3-mini"
+    "lolin-s2-mini" "rp2040-pico" "rp2040-zero"
+    "rp2350-zero" "rp2350-beetle" "seeed-xiao-samd21"))
 
 (defun app ()
   (lambda (env)
@@ -32,16 +34,14 @@
         ((and (eq method :get)
               (member path '("/" "/index.html") :test #'string=))
          (list 200 (list :content-type "text/html; charset=utf-8")
-               (list "<html><body><h1>SECD</h1><button onclick=\"fetch('/api/devices').then(r=>r.text()).then(t=>document.body.innerHTML+='<pre>'+t+'</pre>')\">devices</button></body></html>")))
+               (list "<html><body><h1>SECD Emulator</h1><button onclick=\"fetch('/api/devices').then(r=>r.text()).then(t=>document.body.innerHTML+='<pre>'+t+'</pre>')\">Load Devices</button><pre id='out'></pre></body></html>")))
         (t
          (list 404 nil '("not found")))))))
 
-(defun start ()
-  (clack:clackup (app)
-                 :server :wookie
-                 :address "0.0.0.0"
-                 :port 8899
-                 :use-thread nil
-                 :debug nil))
-
-(start)
+(format t "~&Starting on 0.0.0.0:8899...~%")
+(clack:clackup (app)
+               :server :wookie
+               :address "0.0.0.0"
+               :port 8899
+               :use-thread nil
+               :debug nil)
