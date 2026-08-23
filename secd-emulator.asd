@@ -1,25 +1,23 @@
-;;;; secd-emulator.asd — System definition for secd-emulator
-;;;;
-;;;; Copyright (C) 2026
-;;;; License: GPL3
-
-(asdf:defsystem #:secd-emulator
-  :description "SECD machine emulator for testing"
-  :author "Your Name"
+;;;; secd-emulator.asd — SECD machine emulator: VM + websocket web server
+(defsystem "secd-emulator"
+  :version "0.1.0"
+  :author "turtle-bazon"
   :license "GPL3"
-  :version "0.0.1.0"
-  :depends-on (#:iterate
-               #:metabang-bind
-               #:cl-bazon
-               #:alexandria
-               #:nrepl)
-  :serial t
-  :components ((:module "src"
-                :serial t
-                :components ((:file "package")
-                             (:file "emulator")
-                             (:file "memory")
-                             (:file "io")
-                             (:file "debugger")
-                             (:file "nrepl-server")
-                             (:file "main")))))
+  :depends-on ("clack" "websocket-driver" "clack-handler-wookie" "yason" "bordeaux-threads" "cl-base64"
+               "flexi-streams" "uiop")
+  :components
+  ((:module "src/vm"
+    :components ((:file "package")
+                 (:file "values" :depends-on ("package"))
+                 (:file "machine" :depends-on ("values"))
+                 (:file "primitives" :depends-on ("machine"))))
+   (:module "src/web"
+    :depends-on ("src/vm")
+    :components ((:file "package")
+                 (:file "server" :depends-on ("package"))))))
+
+(defsystem "secd-emulator/executable"
+  :build-operation "program-op"
+  :build-pathname "build/secd-emulator"
+  :entry-point "secd-emulator.web::main"
+  :depends-on ("secd-emulator"))
