@@ -41,24 +41,24 @@
     m))
 
 (defun handle->json (v heap)
-  (cond ((null v) '(("kind" . "undef")))
-        ((eql v secd-emulator.vm:+nil+)  '(("kind" . "nil")))
-        ((eql v secd-emulator.vm:+true+) '(("kind" . "t")))
-        ((eql v secd-emulator.vm:+false+) '(("kind" . "nil")))
+  (cond ((null v) "{\"kind\":\"undef\"}")
+        ((eql v secd-emulator.vm:+nil+)  "{\"kind\":\"nil\"}")
+        ((eql v secd-emulator.vm:+true+) "{\"kind\":\"t\"}")
+        ((eql v secd-emulator.vm:+false+) "{\"kind\":\"nil\"}")
         (t
          (let* ((tag (secd-emulator.vm:handle-tag v))
                 (idx (secd-emulator.vm:handle-index v))
                 (cell-tag (aref (secd-emulator.vm:heap-types heap) idx)))
            (cond
              ((= tag secd-emulator.vm:+tag-fixnum+)
-              `(("kind" . "fixnum") ("i" . ,idx) ("num" . ,(secd-emulator.vm:fixnum-value v))))
+              (format nil "{\"kind\":\"fixnum\",\"i\":~D,\"num\":~D}" idx (secd-emulator.vm:fixnum-value v)))
              ((= tag secd-emulator.vm:+tag-pair+)
-              `(("kind" . "pair") ("i" . ,idx)
-                ("car" . ,(handle->json (secd-emulator.vm:heap-car heap idx) heap))
-                ("cdr" . ,(handle->json (secd-emulator.vm:heap-cdr heap idx) heap))))
+              (format nil "{\"kind\":\"pair\",\"i\":~D,\"car\":~A,\"cdr\":~A}"
+                      idx (handle->json (secd-emulator.vm:heap-car heap idx) heap)
+                      (handle->json (secd-emulator.vm:heap-cdr heap idx) heap)))
              ((= tag secd-emulator.vm:+tag-bytevec+)
-              `(("kind" . "bytevec") ("i" . ,idx) ("len" . ,(secd-emulator.vm:bv-len heap idx))))
-             (t `(("kind" . "obj") ("i" . ,idx))))))))
+              (format nil "{\"kind\":\"bytevec\",\"i\":~D,\"len\":~D}" idx (secd-emulator.vm:bv-len heap idx)))
+             (t (format nil "{\"kind\":\"obj\",\"i\":~D}" idx)))))))
 
 (defun heap->json (heap)
   (loop for i from 0 below (secd-emulator.vm:heap-size heap)
@@ -74,53 +74,62 @@
 
 (defun state-json-string ()
   (when (null *machine*) (return-from state-json-string "{\"ip\":0,\"sp\":0,\"steps\":0,\"error\":0,\"halted\":true,\"code\":[],\"stack\":[],\"e\":{\"kind\":\"nil\"},\"g\":{\"kind\":\"nil\"},\"d\":{\"kind\":\"nil\"},\"heap\":[],\"breakpoints\":[]}"))
-  (let ((m *machine*) (heap *heap*) (o (make-string-output-stream)))
-    (format o "{\"ip\":~D,\"sp\":~D,\"steps\":~D,\"error\":~D,\"halted\":~A,\"code\":["
-            (secd-emulator.vm:machine-ip m) (secd-emulator.vm:machine-sp m) (secd-emulator.vm:machine-steps m)
-            (secd-emulator.vm:machine-error-code m) (if (secd-emulator.vm:halted-p m) "true" "false"))
-    (loop for bv across (secd-emulator.vm:machine-code m)
-          for firstp = t then nil do
-            (unless firstp (write-char #\, o))
-            (format o "~D" bv))
-    (format o "],\"stack\":[")
-    (loop for i from 0 below (secd-emulator.vm:machine-sp m)
-          for v = (aref (secd-emulator.vm:machine-stack m) i)
-          for firstp = t then nil do
-            (unless firstp (write-char #\, o))
-            (format o "~A" (handle->json v heap)))
-    (format o "],\"e\":~A,\"g\":~A,\"d\":{\"kind\":\"nil\"},\"heap\":["
-            (handle->json (secd-emulator.vm:machine-e m) heap)
-            (handle->json (secd-emulator.vm:machine-g m) heap))
-    (loop for i from 0 below (secd-emulator.vm:heap-size heap)
-          for tag = (aref (secd-emulator.vm:heap-types heap) i)
-          when (/= tag 255)
-          do (format o "~A{\"addr\":~D,\"tag\":\"~A\",\"car\":~D,\"cdr\":~D}"
-                     (if (zerop (length (get-output-stream-string o))) "" ",") i
-                     (cond ((= tag secd-emulator.vm:+tag-fixnum+) "fixnum")
-                           ((= tag secd-emulator.vm:+tag-pair+)   "pair")
-                           ((= tag secd-emulator.vm:+tag-bytevec+) "bytevec")
-                           (t "obj"))
-                     (secd-emulator.vm:heap-car heap i) (secd-emulator.vm:heap-cdr heap i)))
-    (format o "],\"breakpoints\":[")
-    (loop for b in *bps* for firstp = t then nil do
-      (unless firstp (write-char #\, o))
-      (format o "~D" b))
-    (format o "]}")
-    (get-output-stream-string o)))
+  (handler-case
+      (let ((m *machine*) (heap *heap*) (o (make-string-output-stream)))
+            (format o "{\"ip\":~D,\"sp\":~D,\"steps\":~D,\"error\":~D,\"halted\":~A,\"code\":["
+                (secd-emulator.vm:machine-ip m) (secd-emulator.vm:machine-sp m) (secd-emulator.vm:machine-steps m)
+                (secd-emulator.vm:machine-error-code m) (if (secd-emulator.vm:halted-p m) "true" "false"))
+        (loop for bv across (coerce (secd-emulator.vm:machine-code m) 'vector)
+              for firstp = t then nil do
+                (unless firstp (write-char #\, o))
+                (format o "~D" bv))
+        (format o "],\"stack\":[")
+        (loop for v across (coerce (subseq (secd-emulator.vm:machine-stack m) 0 (secd-emulator.vm:machine-sp m)) 'vector)
+              for firstp = t then nil do
+                (unless firstp (write-char #\, o))
+                (format o "~A" (handle->json v heap)))
+        (format o "],\"e\":~A,\"g\":~A,\"d\":{\"kind\":\"nil\"},\"heap\":["
+                (handle->json (secd-emulator.vm:machine-e m) heap)
+                (handle->json (secd-emulator.vm:machine-g m) heap))
+        (loop for i from 0 below (secd-emulator.vm:heap-size heap)
+              for tag = (aref (secd-emulator.vm:heap-types heap) i)
+              when (/= tag 255)
+              do (format o "~A{\"addr\":~D,\"tag\":\"~A\",\"car\":~D,\"cdr\":~D}"
+                         (if (zerop i) "" ",") i
+                         (cond ((= tag secd-emulator.vm:+tag-fixnum+) "fixnum")
+                               ((= tag secd-emulator.vm:+tag-pair+)   "pair")
+                               ((= tag secd-emulator.vm:+tag-bytevec+) "bytevec")
+                               (t "obj"))
+                         (secd-emulator.vm:heap-car heap i) (secd-emulator.vm:heap-cdr heap i)))
+        (format o "],\"breakpoints\":[")
+        (loop for b in *bps* for firstp = t then nil do
+          (unless firstp (write-char #\, o))
+          (format o "~D" b))
+        (format o "]}")
+        (let ((result (get-output-stream-string o)))
+            result))
+    (error (kk)
+      (format *error-output* "[state-err] ~A~%" kk)
+      "{\"ip\":0,\"sp\":0,\"steps\":0,\"error\":0,\"halted\":true,\"code\":[],\"stack\":[],\"e\":{\"kind\":\"nil\"},\"g\":{\"kind\":\"nil\"},\"d\":{\"kind\":\"nil\"},\"heap\":[],\"breakpoints\":[]}")))
 
 (defun ws-send (text)
+  (format *error-output* "[ws-send] conn=~A len=~A~%" *console-conn* (length text))
   (when *console-conn*
     (handler-case (websocket-driver:send *console-conn* text)
       (error (kk) (format *error-output* "[ws-send-err] ~A~%" kk)))))
 
 (defun send-state ()
-  (ws-send (concatenate 'string "{\"type\":\"state\"," (state-json-string) "}")))
+  (let* ((body (state-json-string))
+         (msg (concatenate 'string
+                           "{\"type\":\"state\","
+                           (subseq body 1 (1- (length body)))
+                           "}")))
+    (ws-send msg)))
 
 (defun send-halted (err)
   (ws-send (stringify
             (alexandria:plist-alist
              `(("type" . "halted") ("error" . ,err))))))
-
 (defun send-hello ()
   (ws-send "{\"type\":\"hello\"}"))
 
@@ -175,8 +184,7 @@
                (result (if (and bytes (plusp (length bytes)))
                            (secd-emulator.vm:load-bytecode *machine* bytes)
                            :empty)))
-          (format *error-output* "[load] ~A~%" result)
-          (send-state)))
+              (send-state)))
     (error (kk) (format *error-output* "[load-err] ~A~%" kk))))
 
 (defun handle-step-msg ()
@@ -199,7 +207,6 @@
 
 (defun dispatch (msg-str)
   (let* ((m (parse msg-str)) (cmd (or (gethash "cmd" m) "")))
-    (format *error-output* "[dispatch] cmd=~A m-type=~A~%" cmd (type-of m))
     (cond
       ((string= cmd "devices") (send-devices))
       ((string= cmd "select") (handle-select-msg m))
@@ -213,14 +220,20 @@
       (t (format *error-output* "[dispatch] unknown cmd: ~A~%" cmd)))))
 
 (defun handle-ws-upgrade (env)
-  (let ((ws (websocket-driver:make-server env)))
+  (let ((ws (websocket-driver:make-server env))
+        (hello-sent nil))
+
     (setf *console-conn* ws)
-    (websocket-driver:on :open ws (lambda () (send-hello)))
+    (websocket-driver:on :open ws (lambda ()
+                               
+                                   (unless hello-sent
+                                     (setf hello-sent t)
+                                     (send-hello))))
     (websocket-driver:on :message ws
       (lambda (msg)
         (handler-case
             (progn
-              (format *error-output* "[ws-msg] cmd: ~A~%" (gethash "cmd" (parse msg)))
+          
               (dispatch msg)
               (pump-run-loop))
           (error (kk) (format *error-output* "[ws-msg-err] ~A: ~A~%" kk msg)))))
@@ -229,9 +242,12 @@
         (declare (ignore code reason))
         (when (eq ws *console-conn*)
           (setf *console-conn* nil *running* nil))))
-    (lambda (responder)
-      (declare (ignore responder))
-      (websocket-driver:start-connection ws))))
+    (let ((started nil))
+      (lambda (responder)
+        (declare (ignore responder))
+        (unless started
+          (setf started t)
+          (websocket-driver:start-connection ws))))))
 
 (defun www-root ()
   (let ((sys (asdf:find-system :secd-emulator)))
