@@ -597,8 +597,14 @@ document.getElementById("file").addEventListener("change",(e)=>{
   const r=new FileReader();
   r.onload=()=>{
     const b=new Uint8Array(r.result);
-    let s=""; for(let i=0;i<b.length;i++) s+=String.fromCharCode(b[i]);
-    if(transport) transport.send({cmd:"load","bytecode-b64":btoa(s)});
+    // Convert raw bytes to base64 in chunks to avoid blowing the
+    // call stack and to keep every byte intact (no UTF-8 mangling).
+    let bin="";
+    const CHUNK=0x8000;
+    for(let i=0;i<b.length;i+=CHUNK){
+      bin += String.fromCharCode.apply(null, b.subarray(i, i+CHUNK));
+    }
+    if(transport) transport.send({cmd:"load","bytecode-b64":btoa(bin)});
     else out("[no transport]\n","info");
   };
   r.readAsArrayBuffer(f);
@@ -717,7 +723,10 @@ const params=new URLSearchParams(location.search);
 if(params.get("demo")==="1"){
   // stay offline
 }else{
-  const url="ws://"+location.host+"/secd";
+  // Normalize host: "localhost" may resolve to ::1 while the server is
+  // bound to 0.0.0.0, so WS would fail. Prefer 127.0.0.1 in that case.
+  const host = (location.hostname === "localhost") ? "127.0.0.1:" + location.port : location.host;
+  const url="ws://"+host+"/secd";
   transport=new WSTransport(url);
   setTimeout(()=>{if(mode!=="live"){
     out("[ws] no live connection — staying offline.\n","info");
