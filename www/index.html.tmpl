@@ -41,7 +41,7 @@
     heap (array of {addr,tag,car,cdr,num?,len?}),
     breakpoints (array of int), source (optional map addr->line)
 
-  Demo data: __SECD_SNAPSHOTS__  (injected by tools/build-ui.js)
+  Demo data: window.SECD_SNAPSHOTS = JSON.parse(atob("<base64>"))  (injected by tools/build-ui.js)
 -->
 <html><head>
 <meta charset="utf-8">
@@ -348,8 +348,8 @@ let breakpoints=new Set();
 let runTimer=null;
 let mode="offline";      // "offline" | "live"
 
-/* Inject snapshots (set by tools/build-ui.js) */
-__SECD_SNAPSHOTS__
+/* Inject snapshots (set by tools/build-ui.js) — see marker below */
+__INJECT_SECD_SNAPSHOTS__
 
 /* ============================================================
  * Render

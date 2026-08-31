@@ -24,7 +24,7 @@ let tmpl=fs.readFileSync(TEMPLATE,"utf8");
 const b64=Buffer.from(snap,"utf8").toString("base64");
 const inject=`window.SECD_SNAPSHOTS = JSON.parse(atob("${b64}"));\n`;
 // Replace exactly one marker
-if(!tmpl.includes("__SECD_SNAPSHOTS__")){ console.error("template missing marker __SECD_SNAPSHOTS__"); process.exit(1); }
-tmpl=tmpl.replace("__SECD_SNAPSHOTS__", inject);
+if(!tmpl.includes("__INJECT_SECD_SNAPSHOTS__")){ console.error("template missing marker __INJECT_SECD_SNAPSHOTS__"); process.exit(1); }
+tmpl=tmpl.replace("__INJECT_SECD_SNAPSHOTS__", inject);
 fs.writeFileSync(OUT,tmpl);
 console.log("wrote",OUT,tmpl.length,"bytes (snap",snap.length,"bytes, b64",b64.length,")");
