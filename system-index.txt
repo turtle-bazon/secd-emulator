@@ -1,0 +1,2 @@
+secd-emulator.asd
+secd-emulator-test.asd

@@ -277,4 +277,4 @@
 
 (defun main (&rest args)
   (declare (ignore args))
-  (start-server))
+  (start-server))))
