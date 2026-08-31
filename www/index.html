@@ -362,19 +362,22 @@ function render(){
   renderStack();
   renderHeap();
   renderStatus();
+  const total = snapshots ? snapshots.snapshots.length : 0;
   document.getElementById("step-counter").textContent=
-    "step "+snapIndex+" / "+(snapshots.snapshots.length-1);
+    snapshots ? ("step "+snapIndex+" / "+(total-1)) : "live";
 }
 
 function renderCode(){
   const body=document.getElementById("code-body");
-  const lines=disasm(snapshots.code);
+  // In live mode `snapshots` is null — use the live `state.code` instead.
+  const code = (state && state.code) ? state.code : (snapshots ? snapshots.code : []);
+  const lines=disasm(code);
   const prevScroll=body.scrollTop;
   body.innerHTML="";
   for(const ln of lines){
     const row=document.createElement("div");
     row.className="codeline";
-    if(ln.addr===state.ip && !state.halted) row.classList.add("cur");
+    if(state && ln.addr===state.ip && !state.halted) row.classList.add("cur");
     if(breakpoints.has(ln.addr)) row.classList.add("bp");
     row.innerHTML=
       '<span class="gutter">'+(breakpoints.has(ln.addr)?"●":" ")+'</span>'+
