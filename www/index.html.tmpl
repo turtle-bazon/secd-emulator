@@ -370,7 +370,10 @@ function renderCode(){
   const body=document.getElementById("code-body");
   // In live mode `snapshots` is null — use the live `state.code` instead.
   const code = (state && state.code) ? state.code : (snapshots ? snapshots.code : []);
-  const lines=disasm(code);
+  console.log("[renderCode] state=",state,"code.len=",code.length);
+  let lines=[];
+  try { lines=disasm(code); } catch(e) { console.error("[renderCode] disasm err",e); }
+  console.log("[renderCode] lines=",lines.length);
   const prevScroll=body.scrollTop;
   body.innerHTML="";
   for(const ln of lines){
